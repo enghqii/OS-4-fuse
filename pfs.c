@@ -19,9 +19,12 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <signal.h>
+
 /* util */
 void get_command_line(int pid, char * out)
 {
+    int i = 0;
     char path[256];
     FILE* fp;
     sprintf(path, "/proc/%d/cmdline", pid);
@@ -30,6 +33,15 @@ void get_command_line(int pid, char * out)
     if(!fp) return;
 
     fgets(out, 256, fp);
+
+    if(out[0] == '/')
+        strcpy(out + 1, out);
+
+    for( i = 0; i < strlen(out); i++)
+    {
+        if(out[i] == '/') out[i] = '-';
+    }
+
     fclose(fp);
 }
 
@@ -88,18 +100,19 @@ void release_all_process_data()
     int i=0;
     for(i = 0; i < n_proc_data; i++)
     {
-        free(proc_data[i]);
+        if(proc_data[i] != 0) {
+            free(proc_data[i]);
+            proc_data[i] = 0;
+        }
     }
     n_proc_data = 0;
 }
 
 void update_all_process_data()
 {
-    static DIR* dir = NULL;
+    DIR* dir = NULL;
     struct dirent* entry;	// DIRectory ENTry
-
-    if(dir == NULL)
-        dir = opendir("/proc");
+    dir = opendir("/proc");
 
     release_all_process_data();
 
@@ -108,7 +121,7 @@ void update_all_process_data()
         char 		path[256];
 
         int         pid = -1;
-        int         vmsize = 0;
+        int         vm_size = 0;
         char        cmdline[256];
         struct stat fileStat;
 
@@ -119,19 +132,19 @@ void update_all_process_data()
             continue;
 
         pid = atoi(entry->d_name);
-        if( pid < 0 )
+        if( pid <= 0 )
             continue;
 
         get_command_line(pid, cmdline);
-        vmsize = get_vmsize(pid);
+        vm_size = get_vmsize(pid);
 
         if(proc_data[n_proc_data] == 0)
             proc_data[n_proc_data] = (process_data*)malloc(sizeof(process_data));
 
         proc_data[n_proc_data]->_pid    = pid;
-        proc_data[n_proc_data]->vm_size = vmsize;
+        proc_data[n_proc_data]->vm_size = vm_size;
         proc_data[n_proc_data]->_stat   = fileStat;
-        sprintf(proc_data[n_proc_data]->_name, "%d%s", pid, cmdline);
+        sprintf(proc_data[n_proc_data]->_name, "%d-%s", pid, cmdline);
 
         n_proc_data++;
     }
@@ -153,19 +166,31 @@ static int pfs_getattr(const char  *path, struct stat *stbuf)
 
     memset(stbuf, 0, sizeof(struct stat));
 
+    printf("GET ATTR PATH IS %s\n", path);
+
     if(strcmp(path, "/") == 0) {
 
         stbuf->st_mode = S_IFDIR | 0755;
         stbuf->st_nlink = 2;
     }
-    else if(strcmp(path, "asdf") == 0) {
+    else {
 
-        stbuf->st_mode = S_IFDIR | 0644;
-        stbuf->st_nlink = 1;
-        stbuf->st_size = strlen("asdf");
+        int i = 0;
+        for (i = 0; i < n_proc_data; i++)
+        {
+            if (strcmp(path + 1, proc_data[i]->_name) == 0)
+            {
+                stbuf->st_mode = S_IFREG | 0644;
+                stbuf->st_nlink = 1;
+                stbuf->st_size = proc_data[i]->vm_size;
+
+                printf("GET ATTR %s\n", proc_data[i]->_name);
+                return res;
+            }
+        }
+
+        return -ENOENT;
     }
-    else
-        res = -ENOENT;
 
     return res;
 }
@@ -173,6 +198,7 @@ static int pfs_getattr(const char  *path, struct stat *stbuf)
 static int pfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi)
 {
     int res = 0;
+    int i = 0;
 
     (void) offset;
     (void) fi;
@@ -181,12 +207,14 @@ static int pfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_
         return -ENOENT;
 
     // update process data
-
-    filler(buf, ".", NULL, 0);
-    filler(buf, "..", NULL, 0);
-    filler(buf, "asdf", NULL, 0);
+    update_all_process_data();
 
     // and filter others
+    for(i = 0; i < n_proc_data; i++)
+    {
+        printf("FILLER %s\n", proc_data[i]->_name);
+        filler(buf, proc_data[i]->_name, NULL, 0);
+    }
 
     return res;
 }
@@ -195,8 +223,15 @@ static int pfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_
 static int pfs_unlink(const char *path)
 {
     int res = 0;
-    res = -ENOENT;
-    // send SIGKILL
+    int pid = -1;
+
+    sscanf(path, "%d", &pid);
+
+    if(pid < 0)
+        return -ENOENT;
+
+    kill(pid, SIGKILL);
+
     return res;
 }
 
@@ -210,7 +245,10 @@ static struct fuse_operations pfs_oper =
 
 int main (int argc, char **argv)
 {
+    int ret = 0;
     update_all_process_data();
-    print_all_process_info();
-    //return fuse_main (argc, argv, &pfs_oper);
+
+    ret = fuse_main (argc, argv, &pfs_oper);
+    release_all_process_data();
+    return ret;
 }
