@@ -35,7 +35,7 @@ void get_command_line(int pid, char * out)
     fgets(out, 256, fp);
 
     if(out[0] == '/')
-        strcpy(out + 1, out);
+        strcpy(out, out + 1);
 
     for( i = 0; i < strlen(out); i++)
     {
@@ -166,8 +166,6 @@ static int pfs_getattr(const char  *path, struct stat *stbuf)
 
     memset(stbuf, 0, sizeof(struct stat));
 
-    printf("GET ATTR PATH IS %s\n", path);
-
     if(strcmp(path, "/") == 0) {
 
         stbuf->st_mode = S_IFDIR | 0755;
@@ -184,7 +182,6 @@ static int pfs_getattr(const char  *path, struct stat *stbuf)
                 stbuf->st_nlink = 1;
                 stbuf->st_size = proc_data[i]->vm_size;
 
-                printf("GET ATTR %s\n", proc_data[i]->_name);
                 return res;
             }
         }
@@ -212,7 +209,6 @@ static int pfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_
     // and filter others
     for(i = 0; i < n_proc_data; i++)
     {
-        printf("FILLER %s\n", proc_data[i]->_name);
         filler(buf, proc_data[i]->_name, NULL, 0);
     }
 
@@ -225,9 +221,10 @@ static int pfs_unlink(const char *path)
     int res = 0;
     int pid = -1;
 
-    sscanf(path, "%d", &pid);
+    sscanf(path+1, "%d", &pid);
+    printf("UNLINK PATH IS %s pid is %d\n", path, pid);
 
-    if(pid < 0)
+    if(pid <= 0)
         return -ENOENT;
 
     kill(pid, SIGKILL);
