@@ -75,7 +75,7 @@ typedef struct _process_data{
     int         _pid;
 
     char        _name[256];
-    int         vm_size;
+    int         _vm_size;
     struct stat _stat;
 } process_data;
 
@@ -142,7 +142,7 @@ void update_all_process_data()
             proc_data[n_proc_data] = (process_data*)malloc(sizeof(process_data));
 
         proc_data[n_proc_data]->_pid    = pid;
-        proc_data[n_proc_data]->vm_size = vm_size;
+        proc_data[n_proc_data]->_vm_size = vm_size;
         proc_data[n_proc_data]->_stat   = fileStat;
         sprintf(proc_data[n_proc_data]->_name, "%d-%s", pid, cmdline);
 
@@ -180,7 +180,11 @@ static int pfs_getattr(const char  *path, struct stat *stbuf)
             {
                 stbuf->st_mode = S_IFREG | 0644;
                 stbuf->st_nlink = 1;
-                stbuf->st_size = proc_data[i]->vm_size;
+                stbuf->st_size = proc_data[i]->_vm_size;
+
+                stbuf->st_atim = proc_data[i]->_stat.st_atim;
+                stbuf->st_mtim = proc_data[i]->_stat.st_mtim;
+                stbuf->st_ctim = proc_data[i]->_stat.st_ctim;
 
                 return res;
             }
@@ -221,7 +225,7 @@ static int pfs_unlink(const char *path)
     int res = 0;
     int pid = -1;
 
-    sscanf(path+1, "%d", &pid);
+    sscanf(path + 1, "%d", &pid);
     printf("UNLINK PATH IS %s pid is %d\n", path, pid);
 
     if(pid <= 0)
